@@ -279,3 +279,12 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--color-ink); wi
   .faq pre { font-size: var(--text-xs); padding: var(--space-sm); }
   .detail-tools { gap: var(--space-sm); }
 }
+
+#unlock-form { display: flex; align-items: end; gap: var(--space-md); }
+#unlock-form .stacked-field { flex: 1; min-width: 0; margin-bottom: 0; }
+#unlock-form > button { flex-shrink: 0; }
+#registration-form { flex-wrap: wrap; }
+.row-actions { flex-wrap: wrap; }
+@media (max-width: 520px) {
+  #unlock-form { flex-direction: column; align-items: stretch; }
+}

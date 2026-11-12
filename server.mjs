@@ -36,8 +36,15 @@ export function createApp(options = {}) {
       if (request.headers['sec-fetch-site'] === 'cross-site') throw new InputError('Cross-site access is not allowed.', 403);
       if (request.headers.origin && !allowedHosts.map((host) => `http://${host}`).includes(request.headers.origin)) throw new InputError('Origin not allowed.', 403);
       const url = new URL(request.url, `http://${request.headers.host}`);
+      if (url.pathname.startsWith('/api/')) {
+        const supplied = Buffer.from(request.headers['x-skills-token'] || '');
+        const expected = Buffer.from(token);
+        if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+          throw new InputError('Access denied. Open the private launch link from the app or terminal.', 401);
+        }
+      }
       if (request.method === 'GET') {
-        if (url.pathname === '/api/state') return send(200, { ...await store.snapshot(), token });
+        if (url.pathname === '/api/state') return send(200, { ...await store.snapshot(), appVersion: '1.0.0' });
         if (url.pathname === '/api/skill') return send(200, await store.detail(url.searchParams.get('id')));
         if (url.pathname === '/api/discover') return send(200, await store.discover());
         const asset = staticFiles.get(url.pathname);
@@ -47,9 +54,6 @@ export function createApp(options = {}) {
         return response.end(content);
       }
       if (request.method !== 'POST') throw new InputError('Method not allowed.', 405);
-      const supplied = Buffer.from(request.headers['x-skills-token'] || '');
-      const expected = Buffer.from(token);
-      if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) throw new InputError('Session expired. Refresh this page before making changes.', 403);
       if (request.headers['content-type']?.split(';')[0] !== 'application/json') throw new InputError('Send JSON content.', 415);
       const chunks = [];
       let length = 0;
@@ -74,12 +78,15 @@ export function createApp(options = {}) {
         '/api/unlink': () => store.unlinkManaged(input),
         '/api/remove-skill': () => store.removeSkill(input),
         '/api/restore-skill': () => store.restoreSkill(input),
+        '/api/dismiss-activity': () => store.dismissActivity(input),
+        '/api/quit': async () => ({ message: 'Skills Viewer stopped. Launch the application again to reconnect.' }),
       };
       const action = routes[url.pathname];
       if (!action) throw new InputError('Not found.', 404);
       const result = mutation.then(action);
       mutation = result.catch(() => {});
       send(200, await result);
+      if (url.pathname === '/api/quit') server.close();
     } catch (error) {
       const status = error instanceof InputError ? error.status : error.code === 'ENOENT' ? 404 : 500;
       if (status === 500) console.error(error);
@@ -89,6 +96,7 @@ export function createApp(options = {}) {
   });
   server.requestTimeout = 30_000;
   server.headersTimeout = 10_000;
+  server.launchURL = () => `http://127.0.0.1:${server.address().port}/#access=${token}`;
   return server;
 }
 
@@ -100,5 +108,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(`Skills Viewer could not start: ${error.message}`);
     process.exitCode = 1;
   });
-  server.listen(port, '127.0.0.1', () => console.log(`Skills Viewer is ready at http://127.0.0.1:${port}\nLocal only. Press Ctrl+C to stop.`));
+  server.listen(port, '127.0.0.1', () => console.log(`Skills Viewer 1.0 is ready. Open this private link:\n${server.launchURL()}\nDo not share this link. Local only. Press Ctrl+C to stop.`));
 }

@@ -18,6 +18,12 @@ const paths = {
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.file}</svg>`;
 document.querySelectorAll('[data-icon]').forEach((element) => { element.innerHTML = icon(element.dataset.icon); });
+const launchSecret = new URLSearchParams(location.hash.slice(1)).get('access');
+if (launchSecret && /^[a-f0-9]{64}$/.test(launchSecret)) {
+  sessionStorage.setItem('skills-access', launchSecret);
+  history.replaceState(null, '', `${location.pathname}${location.search}`);
+}
+let accessToken = sessionStorage.getItem('skills-access') || '';
 const initial = new URLSearchParams(location.search);
 let tab = ['library', 'agents', 'workspaces', 'activity', 'help'].includes(initial.get('tab')) ? initial.get('tab') : 'library';
 let state;
@@ -50,12 +56,13 @@ function notify(message, error = false) {
   notice.hidden = false;
 }
 async function api(url, data) {
-  const response = await fetch(url, data === undefined ? undefined : {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Skills-Token': state?.token || '' },
-    body: JSON.stringify(data),
+  const response = await fetch(url, {
+    method: data === undefined ? 'GET' : 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Skills-Token': accessToken },
+    ...(data === undefined ? {} : { body: JSON.stringify(data) }),
   });
   const result = await response.json();
+  if (response.status === 401) $('#unlock').hidden = false;
   if (!response.ok) throw new Error(result.error || `Request failed (${response.status}).`);
   return result;
 }
@@ -92,7 +99,7 @@ function setTab(next) {
   $('#add-source').innerHTML = `${icon(tab === 'activity' ? 'link' : 'plus')}${action}`;
   const pageHelp = {
     library: ['A combined inventory, not another storage folder. Select a skill to view, share, edit, or remove a specific location.', 'terms'],
-    agents: ['Each entry is a named folder configuration. Existing paths are evidence only, not verified agent installations or skill support.', 'detection'],
+    agents: ['Add agents explicitly using a name and a documented skills folder. You can remove any registration without deleting its files.', 'detection'],
     workspaces: ['Register a repository or skills folder. Discover folders suggests other repositories; Rescan only refreshes registered locations.', 'discovery'],
     activity: ['See recent changes, disconnect managed links, and restore removed locations. Source files are not deleted when unlinking.', 'removal'],
     help: ['Start here for page documentation, terminology, architecture, folder layouts, and troubleshooting.', 'pages'],
@@ -128,7 +135,8 @@ async function refresh() {
   const result = await api('/api/state');
   state = result;
   $('#skill-count').textContent = state.skills.length;
-  $('#agent-count').textContent = state.agents.filter((agent) => agent.id !== 'shared' && agent.detected).length;
+  $('#agent-count').textContent = state.agents.filter((agent) => agent.id !== 'shared').length;
+  $('#unlock').hidden = true;
   $('#workspace-count').textContent = state.workspaces.length;
   $('#link-count').textContent = state.skills.flatMap((skill) => skill.locations).filter((entry) => entry.linked).length;
   $('#scan-time').textContent = `Scanned ${new Date(state.scannedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
@@ -215,14 +223,14 @@ function renderDetail() {
 }
 
 function renderAgents() {
-  $('#agents-body').innerHTML = state.agents.map((agent) => `<tr><td><div class="agent-title"><span class="agent-badge">${escapeHTML(initials(agent.name))}</span><div><strong>${escapeHTML(agent.name)}</strong><p class="agent-note">${escapeHTML(agent.note)}</p><p class="evidence small">${agent.detected ? 'Path found' : 'Path not found'}: <code class="path">${escapeHTML(shortPath(agent.evidencePath))}</code></p></div></div></td><td><code class="path">${escapeHTML(shortPath(agent.path) || 'Not configured')}</code></td><td class="num">${agent.count}</td><td><span class="status ${agent.skillsFolderExists ? 'ready' : ''}">${!agent.path ? 'Needs skills folder' : agent.skillsFolderExists ? 'Skills path found' : 'Skills path missing'}</span></td><td><div class="row-actions"><button class="text-button" data-configure="${escapeHTML(agent.id)}">Configure</button>${!agent.builtin ? `<button class="icon-button" data-remove-agent="${agent.id}" aria-label="Remove ${escapeHTML(agent.name)} registration">${icon('close')}</button>` : ''}</div></td></tr>`).join('');
+  $('#agents-body').innerHTML = state.agents.length ? state.agents.map((agent) => `<tr><td><div class="agent-title"><span class="agent-badge">${escapeHTML(initials(agent.name))}</span><div><strong>${escapeHTML(agent.name)}</strong><p class="agent-note">${escapeHTML(agent.note)}</p><p class="evidence small">${agent.detected ? 'Path found' : 'Path not found'}: <code class="path">${escapeHTML(shortPath(agent.evidencePath))}</code></p></div></div></td><td><code class="path">${escapeHTML(shortPath(agent.path) || 'Not configured')}</code></td><td class="num">${agent.count}</td><td><span class="status ${agent.skillsFolderExists ? 'ready' : ''}">${!agent.path ? 'Needs skills folder' : agent.skillsFolderExists ? 'Skills path found' : 'Skills path missing'}</span></td><td><div class="row-actions"><button class="text-button" data-configure="${escapeHTML(agent.id)}">Configure</button><button class="text-button" data-remove-agent="${escapeHTML(agent.id)}" aria-label="Remove ${escapeHTML(agent.name)} registration">Remove agent</button></div></td></tr>`).join('') : '<tr><td colspan="5"><div class="empty-state"><h3>No agents registered.</h3><p>Use Add agent to enter a name and its supported skills folder.</p></div></td></tr>';
 }
 function renderWorkspaces() {
   $('#workspaces-body').innerHTML = state.workspaces.length ? state.workspaces.map((workspace) => `<tr><td><div class="agent-title">${icon('folder')}<strong>${escapeHTML(workspace.name)}</strong></div>${!workspace.available ? '<span class="status">Folder not found</span>' : ''}</td><td><code class="path">${escapeHTML(shortPath(workspace.path))}</code></td><td class="num">${workspace.count}</td><td><button class="text-button" data-remove-workspace="${workspace.id}">Remove registration</button></td></tr>`).join('') : '<tr><td colspan="4"><div class="empty-state"><h3>No workspaces registered.</h3><p>Add a repository to discover its workspace skills.</p></div></td></tr>';
 }
 function renderActivity() {
   const methods = { link: 'Source link', copy: 'Independent copy', 'remove-link': 'Removed link', 'remove-skill': 'Removed skill', restore: 'Restored location' };
-  $('#activity-body').innerHTML = state.activity.length ? state.activity.map((event) => `<tr><td><strong>${escapeHTML(event.skill)}</strong><p class="muted small">${escapeHTML(event.agent)}</p><code class="path">${escapeHTML(shortPath(event.destination))}</code></td><td>${escapeHTML(methods[event.mode] || event.mode)}${event.undone ? '<span class="scope-label">Disconnected</span>' : ''}</td><td class="muted">${escapeHTML(new Date(event.at).toLocaleString())}</td><td>${event.mode === 'link' && !event.undone ? `<button class="text-button" data-unlink="${event.id}">Disconnect link</button>` : '<span class="muted">—</span>'}</td></tr>`).join('') : '<tr><td colspan="4"><div class="empty-state"><h3>No changes recorded yet.</h3><p>Choose a skill in your library to share or manage it.</p><button class="button quiet" data-action="library">Browse library</button></div></td></tr>';
+  $('#activity-body').innerHTML = state.activity.length ? state.activity.map((event) => `<tr><td><strong>${escapeHTML(event.skill)}</strong><p class="muted small">${escapeHTML(event.agent)}</p><code class="path">${escapeHTML(shortPath(event.destination))}</code></td><td>${escapeHTML(methods[event.mode] || event.mode)}${event.undone ? '<span class="scope-label">Disconnected</span>' : ''}</td><td class="muted">${escapeHTML(new Date(event.at).toLocaleString())}</td><td>${event.mode === 'link' && !event.undone ? `<button class="text-button" data-unlink="${event.id}">Disconnect link</button>` : state.removed.some((entry) => entry.id === event.id) ? '<span class="muted">In recovery</span>' : `<button class="text-button" data-dismiss="${escapeHTML(event.id)}">Remove entry</button>`}</td></tr>`).join('') : '<tr><td colspan="4"><div class="empty-state"><h3>No changes recorded yet.</h3><p>Choose a skill in your library to share or manage it.</p><button class="button quiet" data-action="library">Browse library</button></div></td></tr>';
   $('#recovery').hidden = !state.removed.length;
   $('#recovery-body').innerHTML = state.removed.map((event) => `<tr><td>${escapeHTML(event.skill)}<span class="scope-label">${event.mode === 'remove-link' ? 'Link only' : 'Skill directory'}</span></td><td><code class="path">${escapeHTML(shortPath(event.source))}</code></td><td><button class="button quiet" data-restore="${escapeHTML(event.id)}">Restore</button></td></tr>`).join('');
 }
@@ -252,10 +260,12 @@ function openRegistration(kind, agent) {
   const isAgent = kind === 'agent';
   $('#registration-title').textContent = agent ? `Configure ${agent.name}` : isAgent ? 'Add an agent' : 'Add a workspace';
   $('#agent-name-label').hidden = !isAgent;
+  $('#agent-preset-label').hidden = !isAgent || !!agent;
+  $('#agent-preset').value = '';
   $('#registration-form').elements.name.required = isAgent;
   $('#registration-form').elements.name.value = agent?.name || '';
   $('#registration-form').elements.path.value = agent?.path || '';
-  $('#registration-form').elements.path.placeholder = isAgent ? '~/.sahaa/skills' : '~/projects/logs_fw';
+  $('#registration-form').elements.path.placeholder = isAgent ? '~/.my-agent/skills' : '~/projects/my-project';
   $('#path-label').textContent = isAgent ? 'Agent skills folder' : 'Repository or skills folder';
   $('#path-help').textContent = isAgent ? 'Use the exact folder your agent reads. It is created only when you share a skill.' : 'Looks in .agents/skills, .github/skills, .claude/skills and other known locations.';
   $('#save-registration').textContent = agent ? 'Save folder' : isAgent ? 'Add agent' : 'Add workspace';
@@ -276,11 +286,11 @@ function share() {
 function renderShareTargets() {
   const copy = $('#share-form').elements.mode.value === 'copy';
   const selectedIds = new Set([...$('#share-targets').querySelectorAll('input:checked')].map((input) => input.value));
-  $('#share-targets').innerHTML = state.agents.map((agent) => {
+  $('#share-targets').innerHTML = state.agents.length ? state.agents.map((agent) => {
     const already = detail.locations.some((entry) => entry.ownerId === agent.id && entry.scope === 'system');
     const destination = agent.path ? `${shortPath(agent.path)}/${detail.folder}` : 'Configure this agent in the Agents tab first.';
     return `<label class="destination"><input type="checkbox" name="target" value="${escapeHTML(agent.id)}" ${!agent.path || already ? 'disabled' : ''} ${selectedIds.has(agent.id) && agent.path && !already ? 'checked' : ''}><span><strong>${escapeHTML(agent.name)}</strong><code class="path">${escapeHTML(destination)}</code></span>${already ? '<span class="status">Has source</span>' : !agent.path ? '<span class="status">Needs folder</span>' : ''}</label>`;
-  }).join('');
+  }).join('') : '<p class="muted small">No destinations registered. Close this dialog and add an agent first.</p>';
   $('#sync-submit').innerHTML = `${icon(copy ? 'file' : 'link')}${copy ? 'Create copies' : 'Create links'}`;
 }
 
@@ -315,6 +325,10 @@ document.addEventListener('click', async (event) => {
     if (button.dataset.unlink) {
       if (!confirm('Disconnect this agent’s link? Its access through this link ends; the source stays untouched.')) return;
       await busy(button, async () => { const result = await api('/api/unlink', { id: button.dataset.unlink }); await refresh(); notify(result.message); });
+    }
+    if (button.dataset.dismiss) {
+      if (!confirm('Remove this history entry? No skill files or sharing destinations will change.')) return;
+      await busy(button, async () => { const result = await api('/api/dismiss-activity', { id: button.dataset.dismiss }); await refresh(); notify(result.message); });
     }
     if (button.dataset.restore) {
       await busy(button, async () => {
@@ -377,6 +391,40 @@ $('#add-source').addEventListener('click', () => {
   else openRegistration(tab === 'agents' ? 'agent' : 'workspace');
 });
 $('#cancel-registration').addEventListener('click', () => { $('#registration').hidden = true; });
+$('#agent-preset').addEventListener('change', (event) => {
+  const presets = {
+    claude: ['Claude Code', '~/.claude/skills'],
+    codex: ['Codex', '~/.codex/skills'],
+    copilot: ['GitHub Copilot', '~/.copilot/skills'],
+    cursor: ['Cursor', '~/.cursor/skills'],
+    gemini: ['Gemini CLI', '~/.gemini/skills'],
+    shared: ['Shared library', '~/.agents/skills'],
+  };
+  const [name, folder] = presets[event.target.value] || ['', ''];
+  $('#registration-form').elements.name.value = name;
+  $('#registration-form').elements.path.value = folder;
+});
+$('#unlock-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const raw = $('#launch-access').value.trim();
+  let token = raw;
+  try { token = new URLSearchParams(new URL(raw).hash.slice(1)).get('access') || ''; } catch { /* Accept a raw secret as well as a launch URL. */ }
+  if (!/^[a-f0-9]{64}$/.test(token)) { notify('Paste the complete private launch link from the app or terminal.', true); return; }
+  accessToken = token;
+  sessionStorage.setItem('skills-access', token);
+  try { await refresh(); $('#launch-access').value = ''; notify('Connected to your local application.'); }
+  catch (error) { notify(error.message, true); }
+});
+$('#quit-app').addEventListener('click', async () => {
+  if (!confirm('Stop Skills Viewer? Existing skill links and copies will remain available.')) return;
+  try {
+    const result = await api('/api/quit', {});
+    sessionStorage.removeItem('skills-access');
+    accessToken = '';
+    document.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+    notify(result.message);
+  } catch (error) { notify(error.message, true); }
+});
 $('#registration-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   $('#registration-error').textContent = '';

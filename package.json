@@ -6,8 +6,10 @@
   "description": "A local, zero-dependency dashboard for agent skills.",
   "scripts": {
     "start": "node server.mjs",
+    "desktop": "node launcher.mjs",
+    "package": "node scripts/package.mjs",
     "test": "node --test test/*.test.mjs",
-    "check": "node --check core.mjs && node --check server.mjs && node --check app.js"
+    "check": "node --check core.mjs && node --check recovery.mjs && node --check server.mjs && node --check launcher.mjs && node --check scripts/package.mjs && node --check app.js"
   },
   "engines": {
     "node": ">=22"

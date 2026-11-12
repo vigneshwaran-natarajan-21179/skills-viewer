@@ -2,21 +2,16 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import { constants } from 'node:fs';
 
+const execute = promisify(execFile);
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const idFor = (value) => hash(value).slice(0, 20);
 const MAX_DOCUMENT = 512 * 1024;
 const WORKSPACE_ROOTS = ['.agents/skills', '.github/skills', '.claude/skills', '.codex/skills', '.copilot/skills', '.cursor/skills', '.gemini/skills'];
-const BUILT_INS = [
-  ['shared', 'Shared library', '.agents/skills', '.agents', 'Shared convention; link to other agent folders for wider access.'],
-  ['claude', 'Claude Code', '.claude/skills', '.claude', 'User-level Claude Code skills.'],
-  ['codex', 'Codex', '.codex/skills', '.codex', 'Codex also reads the shared .agents/skills convention.'],
-  ['copilot', 'GitHub Copilot', '.copilot/skills', '.copilot', 'User-level Copilot skills.'],
-  ['cursor', 'Cursor', '.cursor/skills', '.cursor', 'User-level Cursor skills.'],
-  ['gemini', 'Gemini CLI', '.gemini/skills', '.gemini', 'Enable agent skills in Gemini if your version requires it.'],
-  ['sahaa', 'Sahaa', null, '.sahaa', 'Skill loading is unverified. Configure the folder your agent actually reads.'],
-  ['zllm', 'Zllm', null, '.zllm', 'Skill loading is unverified. Configure the folder your agent actually reads.'],
-];
 
 export class InputError extends Error {
   constructor(message, status = 400) {
@@ -73,7 +68,7 @@ function metadata(document, fallback) {
   };
 }
 
-export function createStore({ home = homedir(), cwd = process.cwd(), dataDir = process.env.SKILLS_VIEWER_DATA_DIR || path.join(home, '.config', 'skills-viewer') } = {}) {
+export function createStore({ home = homedir(), cwd = process.cwd(), includeCwd = true, dataDir = process.env.SKILLS_VIEWER_DATA_DIR || path.join(home, '.config', 'skills-viewer') } = {}) {
   const configFile = path.join(dataDir, 'settings.json');
   let config;
   const expand = (value) => {
@@ -84,8 +79,8 @@ export function createStore({ home = homedir(), cwd = process.cwd(), dataDir = p
   };
   const defaults = () => ({
     version: 1,
-    agents: BUILT_INS.map(([id, name, skills, root, note]) => ({ id, name, path: skills ? path.join(home, skills) : null, root: path.join(home, root), note, builtin: true })),
-    workspaces: [{ id: idFor(cwd), name: path.basename(cwd), path: cwd }],
+    agents: [{ id: 'shared', name: 'Shared library', path: path.join(home, '.agents', 'skills'), root: path.join(home, '.agents', 'skills'), note: 'Shared convention; register other agent folders for explicit access.' }],
+    workspaces: includeCwd ? [{ id: idFor(cwd), name: path.basename(cwd), path: cwd }] : [],
     activity: [],
     removed: [],
   });
@@ -97,7 +92,10 @@ export function createStore({ home = homedir(), cwd = process.cwd(), dataDir = p
       if (parsed.version !== 1 || !Array.isArray(parsed.agents) || !Array.isArray(parsed.workspaces) || !Array.isArray(parsed.activity) || (parsed.removed !== undefined && !Array.isArray(parsed.removed))) {
         throw new Error('Unsupported or invalid settings format.');
       }
-      config = parsed;
+      config = {
+        ...parsed,
+        agents: parsed.agents.filter((agent) => !(agent.builtin && !agent.path && ['sahaa', 'zllm'].includes(agent.id))),
+      };
     } catch (error) {
       if (error.code !== 'ENOENT') throw new Error(`Cannot load ${configFile}: ${error.message}. Your settings were not changed.`);
       config = defaults();
@@ -119,10 +117,27 @@ export function createStore({ home = homedir(), cwd = process.cwd(), dataDir = p
 
   async function readDocument(directory) {
     const filename = path.join(directory, 'SKILL.md');
-    const info = await fs.lstat(filename);
-    if (!info.isFile() || info.isSymbolicLink()) throw new InputError('SKILL.md must be a regular file, not a symbolic link.');
-    if (info.size > MAX_DOCUMENT) throw new InputError('SKILL.md exceeds the 512 KiB preview/edit limit.');
-    return fs.readFile(filename, 'utf8');
+    let handle;
+    try {
+      handle = await fs.open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const info = await handle.stat();
+      if (!info.isFile()) throw new InputError('SKILL.md must be a regular file, not a symbolic link.');
+      if (info.size > MAX_DOCUMENT) throw new InputError('SKILL.md exceeds the 512 KiB preview/edit limit.');
+      const buffer = Buffer.alloc(MAX_DOCUMENT + 1);
+      let total = 0;
+      while (total < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+        if (!bytesRead) break;
+        total += bytesRead;
+      }
+      if (total > MAX_DOCUMENT) throw new InputError('SKILL.md exceeds the 512 KiB preview/edit limit.');
+      return buffer.toString('utf8', 0, total);
+    } catch (error) {
+      if (error.code === 'ELOOP') throw new InputError('SKILL.md must be a regular file, not a symbolic link.');
+      throw error;
+    } finally {
+      await handle?.close();
+    }
   }
 
   async function snapshot() {
@@ -225,7 +240,6 @@ export function createStore({ home = homedir(), cwd = process.cwd(), dataDir = p
     if (!['agents', 'workspaces'].includes(kind)) throw new InputError('Invalid registration type.');
     const item = current[kind].find((entry) => entry.id === id);
     if (!item) throw new InputError('Registration not found.', 404);
-    if (kind === 'agents' && item.builtin) throw new InputError('Built-in agents cannot be removed; configure their folder instead.');
     await save({ ...current, [kind]: current[kind].filter((entry) => entry.id !== id) });
     return { message: 'Registration removed. No skill files were deleted.' };
   }
@@ -312,12 +326,14 @@ export function createStore({ home = homedir(), cwd = process.cwd(), dataDir = p
         if (canonicalParent === skill.path || canonicalParent.startsWith(`${skill.path}${path.sep}`)) throw new InputError('The destination resolves inside the source skill.');
         if (input.mode === 'link') await fs.symlink(skill.path, destination, 'dir');
         else {
-          await fs.mkdir(destination);
+          await fs.mkdir(destination, { mode: (await fs.stat(skill.path)).mode & 0o777 });
           created = true;
-          await fs.cp(skill.path, destination, { recursive: true, force: false, errorOnExist: true, dereference: false });
+          for (const name of await fs.readdir(skill.path)) {
+            await fs.cp(path.join(skill.path, name), path.join(destination, name), { recursive: true, force: false, errorOnExist: true, dereference: false });
+          }
         }
         created = true;
-        const event = { id: randomUUID(), skill: skill.name, source: skill.path, agent: agent.name, destination, mode: input.mode, at: new Date().toISOString() };
+        const event = { id: randomUUID(), skill: skill.name, source: skill.path, agent: agent.name, destination, destinationParent: canonicalParent, mode: input.mode, at: new Date().toISOString() };
         try {
           await save({ ...config, activity: [event, ...config.activity].slice(0, 200) });
         } catch (error) {
@@ -359,9 +375,26 @@ export function createStore({ home = homedir(), cwd = process.cwd(), dataDir = p
     if (!event || event.mode !== 'link' || event.undone) throw new InputError('Only active links created by this app can be disconnected.');
     const info = await exists(event.destination);
     if (info && (!info.isSymbolicLink() || await fs.readlink(event.destination) !== event.source)) throw new InputError('The destination has changed. Nothing was removed.', 409);
-    if (info) await fs.unlink(event.destination);
-    await save({ ...current, activity: current.activity.map((item) => item.id === event.id ? { ...item, undone: true } : item) });
+    const parent = await fs.realpath(path.dirname(event.destination));
+    if (event.destinationParent && parent !== event.destinationParent) throw new InputError('The destination parent changed. Nothing was disconnected.', 409);
+    if (info) await fs.unlink(path.join(parent, path.basename(event.destination)));
+    try {
+      await save({ ...current, activity: current.activity.map((item) => item.id === event.id ? { ...item, undone: true } : item) });
+    } catch (error) {
+      if (info) await fs.symlink(event.source, path.join(parent, path.basename(event.destination)), 'dir');
+      throw error;
+    }
     return { message: 'Link disconnected. The original skill is untouched.' };
+  }
+
+  async function dismissActivity(input) {
+    const current = await load();
+    const event = current.activity.find((item) => item.id === input.id);
+    if (!event) throw new InputError('Activity entry not found.', 404);
+    if (event.mode === 'link' && !event.undone) throw new InputError('Disconnect this active link before removing its history entry.', 409);
+    if ((current.removed || []).some((item) => item.id === event.id)) throw new InputError('Restore this removed skill before clearing its history entry.', 409);
+    await save({ ...current, activity: current.activity.filter((item) => item.id !== event.id) });
+    return { message: 'History entry removed. No skill files or sharing destinations were changed.' };
   }
 
   async function removeSkill(input) {
@@ -387,10 +420,11 @@ export function createStore({ home = homedir(), cwd = process.cwd(), dataDir = p
       mode: info.isSymbolicLink() ? 'remove-link' : 'remove-skill',
       agent: location.ownerName, at: new Date().toISOString(),
       linkTarget: info.isSymbolicLink() ? await fs.readlink(location.path) : null,
+      parent: await parentIdentity(path.dirname(location.path)),
     };
     let moved = false;
     try {
-      await fs.rename(event.source, event.destination);
+      await fs.rename(path.join(event.parent.path, path.basename(event.source)), event.destination);
       moved = true;
       const previous = current.activity.map((item) => item.mode === 'link' && item.destination === location.path ? { ...item, undone: true } : item);
       await save({ ...current, removed: [event, ...(current.removed || [])], activity: [event, ...previous].slice(0, 200) });
@@ -407,6 +441,11 @@ export function createStore({ home = homedir(), cwd = process.cwd(), dataDir = p
     const current = await load();
     const event = (current.removed || []).find((item) => item.id === input.id);
     if (!event) throw new InputError('Removed skill not found.', 404);
+    if (!event.parent) throw new InputError('This older recovery record has no parent identity. Restore it manually after checking the original directory.', 409);
+    const parent = await parentIdentity(path.dirname(event.source));
+    if (parent.path !== event.parent.path || parent.dev !== event.parent.dev || parent.ino !== event.parent.ino) {
+      throw new InputError('The original parent directory changed. Nothing was restored.', 409);
+    }
     if (await exists(event.source)) throw new InputError('The original location is occupied. Nothing was overwritten.', 409);
     const info = await fs.lstat(event.destination);
     if (event.mode === 'remove-link' ? !info.isSymbolicLink() || await fs.readlink(event.destination) !== event.linkTarget : !info.isDirectory() || info.isSymbolicLink()) {
@@ -416,28 +455,32 @@ export function createStore({ home = homedir(), cwd = process.cwd(), dataDir = p
       const target = path.resolve(path.dirname(event.source), event.linkTarget);
       if (!(await exists(target))) throw new InputError('The original link target is missing. Restore its source first.', 409);
     }
-    await fs.mkdir(path.dirname(event.source), { recursive: true });
-    if (event.mode === 'remove-link') await fs.symlink(event.linkTarget, event.source, 'dir');
-    else {
-      await fs.mkdir(event.source);
-      try {
-        await fs.rename(event.destination, event.source);
-      } catch (error) {
-        await fs.rmdir(event.source);
-        throw error;
-      }
-    }
+    await recoveryOperation('restore', event);
     try {
       const restored = { id: randomUUID(), skill: event.skill, source: event.destination, destination: event.source, agent: event.agent, mode: 'restore', at: new Date().toISOString() };
       await save({ ...current, removed: current.removed.filter((item) => item.id !== event.id), activity: [restored, ...current.activity].slice(0, 200) });
     } catch (error) {
-      if (event.mode === 'remove-link') await fs.unlink(event.source);
-      else await fs.rename(event.source, event.destination);
+      await recoveryOperation('rollback', event);
       throw error;
     }
     if (event.mode === 'remove-link') await fs.unlink(event.destination);
     return { message: 'Skill location restored. Rescan or restart the agent if it caches skills.' };
   }
 
-  return { snapshot, detail, addAgent, addWorkspace, removeRegistration, discover, sync, edit, unlinkManaged, removeSkill, restoreSkill };
+  return { snapshot, detail, addAgent, addWorkspace, removeRegistration, discover, sync, edit, unlinkManaged, removeSkill, restoreSkill, dismissActivity };
+}
+
+async function parentIdentity(directory) {
+  const canonical = await fs.realpath(directory);
+  const info = await fs.stat(canonical, { bigint: true });
+  if (!info.isDirectory()) throw new InputError('Expected a directory.', 409);
+  return { path: canonical, dev: info.dev.toString(), ino: info.ino.toString() };
+}
+
+async function recoveryOperation(action, event) {
+  try {
+    await execute(process.execPath, [fileURLToPath(new URL('./recovery.mjs', import.meta.url)), action, JSON.stringify(event)], { cwd: event.parent.path });
+  } catch (error) {
+    throw new InputError(`Recovery failed: ${error.stderr?.trim() || error.message}`, 409);
+  }
 }

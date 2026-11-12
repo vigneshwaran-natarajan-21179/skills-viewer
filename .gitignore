@@ -6,3 +6,4 @@ coverage/
 .env.*
 settings.json
 trash/
+dist/
