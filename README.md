@@ -13,11 +13,11 @@ The self-contained version **1.0.0** archives in `dist/` include a checksum-veri
 | Linux x64 | `skills-viewer-1.0.0-linux-x64.tar.gz` | Extract and run `./skills-viewer/skills-viewer`. |
 | Linux ARM64 | `skills-viewer-1.0.0-linux-arm64.tar.gz` | Extract and run `./skills-viewer/skills-viewer`. |
 
-The desktop launcher starts a loopback server on an available port and opens your default browser with a private access link. The app uses that browser instead of embedding another Chromium instance. **Stop app** in the footer shuts down the server; closing the tab alone does not. Launch the app again after stopping it. Run only one app instance per profile.
+Every click on the application icon opens your default browser with a private access link. The short-lived desktop launcher starts a background loopback server on an available port, or reuses the running desktop server for that profile. The app uses your browser instead of embedding another Chromium instance. **Stop app** in the footer shuts down the server; closing the tab alone does not. Click the icon again to reopen the dashboard or restart it after stopping.
 
 macOS builds are **unsigned and not notarized**; a downloaded app may require macOS's explicit “Open Anyway” approval. They require macOS 11 or newer. Linux requires a desktop session with `xdg-open` and a compatible glibc-based distribution (glibc 2.28+); these are not Alpine/musl builds. Native execution is verified on the build Mac; do not assume an unexecuted target has been runtime-tested.
 
-To add the Linux launcher to your app menu, put the extracted `skills-viewer` executable on your PATH (or update the provided `.desktop` file's Exec to its absolute path) and copy `skills-viewer.desktop` into `~/.local/share/applications/`. Keep its bundled `runtime/` and `app/` beside the executable.
+On Linux, run `./skills-viewer/skills-viewer --install` once after extraction to add **Skills Viewer** to your application menu with absolute executable and icon paths (no PATH changes needed). Then click its icon to open the browser. Keep the extracted folder in place with its bundled `runtime/` and `app/`; rerun `--install` if you move it. Desktop launch diagnostics are in `~/.config/skills-viewer/launcher.log` (or `SKILLS_VIEWER_DATA_DIR/launcher.log`).
 
 Rebuild all four archives, or pass specific targets:
 

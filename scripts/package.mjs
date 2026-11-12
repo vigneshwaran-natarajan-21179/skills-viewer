@@ -56,11 +56,10 @@ for (const target of targets.length ? targets : supported) {
     if (isMac) {
       const executable = path.join(bundle, 'Contents', 'MacOS', 'skills-viewer');
       await fs.mkdir(path.dirname(executable), { recursive: true });
-      await fs.writeFile(executable, '#!/bin/sh\nset -eu\nROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../Resources" && pwd)\nexec "$ROOT/runtime/node" "$ROOT/app/launcher.mjs" "$@"\n', { mode: 0o755 });
+      await fs.writeFile(executable, '#!/bin/sh\nset -eu\nROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../Resources" && pwd)\nexec "$ROOT/runtime/node" "$ROOT/app/launcher.mjs" --background "$@"\n', { mode: 0o755 });
       await fs.writeFile(path.join(bundle, 'Contents', 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>CFBundleName</key><string>Skills Viewer</string>\n<key>CFBundleDisplayName</key><string>Skills Viewer</string>\n<key>CFBundleIdentifier</key><string>local.skills-viewer.app</string>\n<key>CFBundleVersion</key><string>${version}</string>\n<key>CFBundleShortVersionString</key><string>${version}</string>\n<key>CFBundleExecutable</key><string>skills-viewer</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n<key>LSMinimumSystemVersion</key><string>11.0</string>\n<key>LSUIElement</key><true/>\n</dict></plist>\n`);
     } else {
-      await fs.writeFile(path.join(bundle, 'skills-viewer'), '#!/bin/sh\nset -eu\nROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$ROOT/runtime/node" "$ROOT/app/launcher.mjs" "$@"\n', { mode: 0o755 });
-      await fs.writeFile(path.join(bundle, 'skills-viewer.desktop'), '[Desktop Entry]\nType=Application\nName=Skills Viewer\nComment=Local AI skills dashboard, version 1.0\nExec=skills-viewer\nTerminal=false\nCategories=Development;Utility;\n');
+      await fs.writeFile(path.join(bundle, 'skills-viewer'), '#!/bin/sh\nset -eu\nROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$ROOT/runtime/node" "$ROOT/app/launcher.mjs" --background "$@"\n', { mode: 0o755 });
     }
     const filename = `skills-viewer-${version}-${target}${isMac ? '.zip' : '.tar.gz'}`;
     const destination = path.join(output, filename);

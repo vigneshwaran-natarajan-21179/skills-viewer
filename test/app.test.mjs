@@ -345,24 +345,28 @@ test('all APIs require owner-provided authentication; the secret is not disclose
   assert((await fs.lstat(linked)).isSymbolicLink());
 });
 
-test('desktop launcher opens only through an owner secret and shuts down using authenticated Stop app', { timeout: 15_000 }, async (t) => {
+test('desktop launcher requires the owner secret, stops cleanly, and recovers after a crash', { timeout: 15_000 }, async (t) => {
   const { home, options } = await fixture(t);
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../launcher.mjs', import.meta.url)), '--no-open'], {
-    env: { ...process.env, HOME: home, PORT: '0', SKILLS_VIEWER_DATA_DIR: options.dataDir },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const exited = once(child, 'exit');
-  t.after(() => { if (child.exitCode === null) child.kill('SIGTERM'); });
-  const url = await new Promise((resolve, reject) => {
-    let output = '';
-    child.stdout.on('data', (chunk) => {
-      output += chunk;
-      const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/#access=[a-f0-9]{64}/);
-      if (match) resolve(new URL(match[0]));
+  const start = async () => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL('../launcher.mjs', import.meta.url)), '--no-open'], {
+      env: { ...process.env, HOME: home, PORT: '0', SKILLS_VIEWER_DATA_DIR: options.dataDir },
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    child.on('error', reject);
-    child.on('exit', (code) => reject(new Error(`Launcher exited before ready: ${code}`)));
-  });
+    const exited = once(child, 'exit');
+    t.after(() => { if (child.exitCode === null) child.kill('SIGTERM'); });
+    const url = await new Promise((resolve, reject) => {
+      let output = '';
+      child.stdout.on('data', (chunk) => {
+        output += chunk;
+        const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/#access=[a-f0-9]{64}/);
+        if (match) resolve(new URL(match[0]));
+      });
+      child.on('error', reject);
+      child.on('exit', (code) => reject(new Error(`Launcher exited before ready: ${code}`)));
+    });
+    return { child, exited, url };
+  };
+  const { exited, url } = await start();
   const token = new URLSearchParams(url.hash.slice(1)).get('access');
   assert.equal((await fetch(`${url.origin}/api/state`)).status, 401);
   const headers = { 'X-Skills-Token': token, 'Content-Type': 'application/json' };
@@ -372,4 +376,77 @@ test('desktop launcher opens only through an owner secret and shuts down using a
   assert.deepEqual(state.agents.map((agent) => agent.id), ['shared']);
   assert.equal((await fetch(`${url.origin}/api/quit`, { method: 'POST', headers, body: '{}' })).status, 200);
   assert.equal((await exited)[0], 0);
+  const crashed = await start();
+  crashed.child.kill('SIGKILL');
+  await crashed.exited;
+  const recovered = await start();
+  assert.notEqual(recovered.url.hash, crashed.url.hash);
+  assert.equal((await fetch(recovered.url.origin)).status, 200);
+  assert.equal((await fetch(`${recovered.url.origin}/api/quit`, {
+    method: 'POST', headers: { ...headers, 'X-Skills-Token': recovered.url.hash.slice('#access='.length) }, body: '{}',
+  })).status, 200);
+  assert.equal((await recovered.exited)[0], 0);
+});
+
+test('icon launcher exits, reopens one background server, and restarts after Stop app', { timeout: 30_000 }, async (t) => {
+  const { home, options } = await fixture(t);
+  const bin = path.join(home, 'bin');
+  const opened = path.join(home, 'opened.log');
+  await fs.mkdir(bin);
+  await fs.writeFile(path.join(bin, process.platform === 'darwin' ? 'open' : 'xdg-open'),
+    '#!/bin/sh\nprintf "%s\\n" "$1" >> "$SKILLS_VIEWER_OPEN_LOG"\n', { mode: 0o755 });
+  const env = { ...process.env, HOME: home, PORT: '0', PATH: `${bin}:${process.env.PATH}`, SKILLS_VIEWER_DATA_DIR: options.dataDir, SKILLS_VIEWER_OPEN_LOG: opened };
+  const urls = new Set();
+  const stop = async (url) => fetch(`${url.origin}/api/quit`, {
+    method: 'POST', headers: { 'X-Skills-Token': url.hash.slice('#access='.length), 'Content-Type': 'application/json' },
+    body: '{}', signal: AbortSignal.timeout(2000),
+  });
+  t.after(async () => {
+    for (const url of urls) {
+      try { await stop(url); } catch (error) {
+        if (error.cause?.code !== 'ECONNREFUSED') throw error;
+      }
+    }
+  });
+  const click = async () => {
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      fileURLToPath(new URL('../launcher.mjs', import.meta.url)), '--background',
+    ], { env, timeout: 10_000 });
+    const url = new URL(stdout.match(/http:\/\/127\.0\.0\.1:\d+\/#access=[a-f0-9]{64}/)[0]);
+    urls.add(url);
+    return url;
+  };
+  const [first, repeated] = await Promise.all([click(), click()]);
+  assert.equal(first.href, repeated.href);
+  assert.equal((await fetch(first.origin)).status, 200);
+  assert.equal((await fetch(`${first.origin}/api/state`)).status, 401);
+  assert.equal((await click()).href, first.href);
+  assert.deepEqual((await fs.readFile(opened, 'utf8')).trim().split('\n'), [first.href, first.href, first.href]);
+  assert.deepEqual((await Promise.all([click(), click()])).map((url) => url.href), [first.href, first.href]);
+  assert.equal((await stop(first)).status, 200);
+  urls.delete(first);
+  const restarted = await click();
+  assert.notEqual(restarted.hash, first.hash);
+  assert.equal((await fetch(restarted.origin)).status, 200);
+  const log = await fs.stat(path.join(options.dataDir, 'launcher.log'));
+  assert.equal(log.mode & 0o777, 0o600);
+});
+
+test('Linux menu installation uses absolute quoted paths and does not start a server', async (t) => {
+  const { home } = await fixture(t);
+  const data = path.join(home, 'desktop data');
+  const application = path.join(home, 'app $100%');
+  await fs.mkdir(application);
+  for (const file of ['launcher.mjs', 'server.mjs', 'core.mjs', 'recovery.mjs']) {
+    await fs.copyFile(fileURLToPath(new URL(`../${file}`, import.meta.url)), path.join(application, file));
+  }
+  await promisify(execFile)(process.execPath, [
+    path.join(application, 'launcher.mjs'), '--install',
+  ], { env: { ...process.env, HOME: home, XDG_DATA_HOME: data } });
+  const entry = await fs.readFile(path.join(data, 'applications', 'skills-viewer.desktop'), 'utf8');
+  assert(entry.includes(`Exec="${process.execPath}" "`));
+  assert(entry.includes(String.raw`app \\$100%%`));
+  assert(entry.includes('launcher.mjs" --background\n'));
+  assert(entry.includes('Terminal=false\n'));
+  assert(entry.includes(`Icon=${path.join(application, 'icon.svg')}\n`));
 });
