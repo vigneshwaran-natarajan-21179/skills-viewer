@@ -1,0 +1,15 @@
+{
+  "name": "skills-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A local, zero-dependency dashboard for agent skills.",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check core.mjs && node --check server.mjs && node --check app.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

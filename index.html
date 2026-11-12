@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f3ef">
+  <meta name="description" content="Discover, inspect and safely share local AI agent skills across workspaces and agent folders.">
+  <title>Skills Viewer: your local skills library</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar">
+    <div class="shell header-inner">
+      <a class="brand" href="/" aria-label="Skills Viewer home"><img src="/icon.svg" alt="" width="34" height="34"><span>Skills Viewer</span><span class="local-label">Local</span></a>
+      <nav aria-label="Main navigation">
+        <a href="/?tab=library" data-tab="library" aria-current="page">Library</a>
+        <a href="/?tab=agents" data-tab="agents">Agents</a>
+        <a href="/?tab=workspaces" data-tab="workspaces">Workspaces</a>
+        <a href="/?tab=activity" data-tab="activity">Activity</a>
+        <a href="/?tab=help" data-tab="help">Help &amp; FAQ</a>
+      </nav>
+      <div class="scan-actions"><a class="icon-button" href="/?tab=help#scan" data-help="scan" aria-label="What does Rescan do?"><span data-icon="info"></span></a><button class="button quiet" id="refresh" type="button"><span data-icon="refresh"></span>Rescan</button></div>
+    </div>
+  </header>
+  <main class="shell" id="main">
+    <section class="page-heading">
+      <div><h1 id="page-title">A home for your skills.</h1><p id="page-description">Find them once. Put them to work in every agent.</p></div>
+      <button class="button primary" id="add-source" type="button"><span data-icon="plus"></span>Add workspace</button>
+    </section>
+    <details class="page-help" id="page-help"><summary><span data-icon="info"></span>About this page</summary><p id="page-help-text"></p><a id="page-help-link" href="/?tab=help#pages" data-help="pages">Read the page guide</a></details>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <details id="warnings" class="warnings" hidden><summary id="warning-summary"></summary><ul id="warning-list"></ul></details>
+    <section id="registration" class="registration" aria-labelledby="registration-title" hidden>
+      <div class="section-title"><h2 id="registration-title">Add workspace</h2><button class="icon-button" id="cancel-registration" aria-label="Close form" type="button"><span data-icon="close"></span></button></div>
+      <form id="registration-form">
+        <label id="agent-name-label" hidden>Agent name<input name="name" maxlength="80" placeholder="Sahaa" autocomplete="off"></label>
+        <label class="path-field"><span id="path-label">Repository or skills folder</span><input name="path" placeholder="~/projects/logs_fw" required autocomplete="off" spellcheck="false"><span class="helper" id="path-help">Use an absolute path. Existing files are never moved.</span></label>
+        <button class="button primary" type="submit" id="save-registration">Add workspace</button>
+      </form>
+      <p class="form-error" id="registration-error" role="alert"></p>
+    </section>
+    <section class="overview" id="overview" aria-label="Inventory summary">
+      <div><span class="stat-number" id="skill-count">…</span><span>Unique skills</span></div>
+      <div><span class="stat-number" id="agent-count">…</span><span>Known agent paths <a href="/?tab=help#detection" data-help="detection" aria-label="How are agent paths detected?"><span data-icon="info"></span></a></span></div>
+      <div><span class="stat-number" id="workspace-count">…</span><span>Workspaces</span></div>
+      <div><span class="stat-number" id="link-count">…</span><span>Linked locations</span></div>
+      <p class="overview-note"><span data-icon="shield"></span>On your machine.<br>Under your control.</p>
+    </section>
+    <section id="library-view" aria-label="Skill library">
+      <div class="library-heading"><div class="section-title"><h2>All skills</h2><span class="count-label" id="filtered-count"></span></div><span class="muted small" id="scan-time">Reading local folders…</span></div>
+      <div class="filters">
+        <label class="search-label"><span data-icon="search"></span><span class="visually-hidden">Search skills</span><input id="search" type="search" placeholder="Search skills, descriptions, folders…" autocomplete="off"></label>
+        <label><span class="visually-hidden">Filter by scope</span><select id="scope"><option value="">All scopes</option><option value="system">System level</option><option value="workspace">Workspace level</option></select></label>
+        <label><span class="visually-hidden">Filter by source</span><select id="source"><option value="">All sources</option></select></label>
+      </div>
+      <div class="workbench">
+        <section class="inventory" aria-label="Skills">
+          <div class="table-wrap">
+            <table class="skill-table"><thead><tr><th>Skill</th><th>Source</th><th>Available in</th><th><span class="visually-hidden">Details</span></th></tr></thead><tbody id="skills-body"><tr><td colspan="4"><div class="loading-line"></div><p class="muted">Reading your skill library…</p></td></tr></tbody></table>
+          </div>
+          <div class="pagination"><span id="page-range" class="muted small"></span><div><button class="icon-button" id="previous-page" type="button" aria-label="Previous page"><span data-icon="left"></span></button><button class="icon-button" id="next-page" type="button" aria-label="Next page"><span data-icon="right"></span></button></div></div>
+        </section>
+        <aside class="inspector" id="inspector" aria-label="Skill details"><div class="empty-detail"><span data-icon="layers"></span><h2>A little more context.</h2><p>Select a skill to inspect its instructions, files, and agent access.</p></div></aside>
+      </div>
+    </section>
+    <section id="agents-view" hidden aria-labelledby="agents-title">
+      <div class="view-intro"><h2 id="agents-title">Your agents, connected.</h2><p>These are configured names and folder checks, not verified installations. Skill loading must be supported by the agent. <a href="/?tab=help#detection" data-help="detection">How detection works</a></p></div>
+      <div class="table-wrap"><table><thead><tr><th>Agent &amp; folder evidence</th><th>Skills folder</th><th>Skills</th><th>Folder status</th><th>Manage</th></tr></thead><tbody id="agents-body"></tbody></table></div>
+      <div class="help-band"><span data-icon="info"></span><p>The shared library is <code>~/.agents/skills</code>, not a universal switch. Link skills to each agent’s configured folder for explicit access. No background service is needed after linking.</p></div>
+    </section>
+    <section id="workspaces-view" hidden aria-labelledby="workspaces-title">
+      <div class="view-intro"><h2 id="workspaces-title">Local knowledge, ready to reuse.</h2><p>Register a repository or a folder of skill directories. Discovery reads known skill locations, not your whole disk.</p></div>
+      <div class="table-wrap"><table><thead><tr><th>Workspace</th><th>Folder</th><th>Skill locations</th><th>Manage</th></tr></thead><tbody id="workspaces-body"></tbody></table></div>
+      <div class="discovery-heading"><div><h2>Find more workspaces</h2><p class="muted">Check common project folders, up to three levels deep.</p></div><button id="discover" class="button quiet" type="button"><span data-icon="search"></span>Discover folders</button></div>
+      <div id="discovery-results" aria-live="polite"></div>
+    </section>
+    <section id="activity-view" hidden aria-labelledby="activity-title">
+      <div class="view-intro"><h2 id="activity-title">A clear trail of changes.</h2><p>Sharing and removal history stays on this machine. Restore removed locations below.</p></div>
+      <section id="recovery" hidden aria-labelledby="recovery-title"><h2 id="recovery-title">Removed skills</h2><p class="muted small">Recovery storage has no automatic expiry. Restoring never replaces an occupied location.</p><div class="table-wrap"><table><thead><tr><th>Skill</th><th>Original location</th><th>Manage</th></tr></thead><tbody id="recovery-body"></tbody></table></div></section>
+      <div class="table-wrap"><table><thead><tr><th>Skill &amp; destination</th><th>Method</th><th>Created</th><th>Manage</th></tr></thead><tbody id="activity-body"></tbody></table></div>
+    </section>
+    <section id="help-view" class="help-content" hidden aria-labelledby="help-title">
+      <div class="view-intro"><h2 id="help-title">Understand before you share.</h2><p>This dashboard manages folders. It does not install agents, add missing agent capabilities, or use AI to identify software.</p></div>
+      <nav class="help-index" aria-label="Help topics"><a href="#start" data-help="start">Start</a><a href="#terms" data-help="terms">Terms</a><a href="#pages" data-help="pages">Pages</a><a href="#links" data-help="links">Links &amp; copies</a><a href="#detection" data-help="detection">Detection</a><a href="#architecture" data-help="architecture">Architecture</a><a href="#removal" data-help="removal">Removal</a></nav>
+      <details class="faq" id="start" open><summary>How do I start and stop the application?</summary><div>
+        <p>Install Node.js 22 or newer, open a terminal in this application’s folder, and run:</p><pre><code>npm start</code></pre>
+        <p>Open <a href="http://127.0.0.1:4317">http://127.0.0.1:4317</a>. Stop the server with Ctrl+C in that terminal. You do not need npm install: there are no runtime dependencies.</p>
+        <p>If port 4317 is busy, stop your previous instance or run <code>PORT=4320 npm start</code> and open port 4320. For a fresh isolated profile, run <code>SKILLS_VIEWER_DATA_DIR=/absolute/path/to/profile npm start</code>.</p>
+        <p>From a private GitHub repository: clone its URL with <code>git clone</code>, enter the cloned folder with <code>cd</code>, then run <code>npm start</code>. Private clones require an authorized GitHub account or SSH key.</p>
+      </div></details>
+      <details class="faq" id="terms"><summary>What are a skill, library, agent, and workspace?</summary><div>
+        <dl><dt>Skill</dt><dd>A directory with a regular file named SKILL.md containing agent instructions. It may also contain scripts, references, or assets. This app never executes those scripts.</dd>
+        <dt>Library</dt><dd>The combined view of skills found in registered agent and workspace folders. It is an inventory, not another storage directory. Links to the same real directory appear once; independent copies appear as separate entries.</dd>
+        <dt>Agent</dt><dd>A named destination, such as Claude Code or Sahaa, with a configured skills folder. The agent itself decides whether and how to load SKILL.md.</dd>
+        <dt>Workspace</dt><dd>A repository or local project directory, such as logs_fw. Registering one lets the dashboard inspect known skill subfolders. You can also register a folder directly containing skill directories.</dd>
+        <dt>System level</dt><dd>In this app, your user-level agent folders under your home directory. This is not an operating-system-wide installation for every user.</dd>
+        <dt>Shared library</dt><dd>The destination ~/.agents/skills. Some agents read this convention, but it does not automatically make skills accessible to every agent.</dd></dl>
+      </div></details>
+      <details class="faq" id="pages"><summary>What does each page do?</summary><div>
+        <dl><dt>Library</dt><dd>Search and filter the inventory by scope or source. Select a skill to inspect its real folder, raw instructions, supporting filenames, and known locations. Share it, edit its source SKILL.md, or remove one chosen location.</dd>
+        <dt>Agents</dt><dd>See the built-in agent presets and custom destinations. Folder evidence explains why an entry is counted. Configure a skills path or add a new agent. Removing a custom registration forgets it without deleting files.</dd>
+        <dt>Workspaces</dt><dd>Register a repository or skills folder. Discover folders suggests other repositories in common project directories; you choose which to register. Removing a registration does not delete the repository or its skills.</dd>
+        <dt>Activity</dt><dd>See the last 200 sharing, removal, and restoration events. Disconnect an unchanged link created by this app, or restore a removed skill location. Pending recovery records are kept independently of the 200-event limit.</dd>
+        <dt>Help &amp; FAQ</dt><dd>Learn the terminology, folder conventions, startup steps, limits, and safety rules. The information icons around the app open the relevant answer here.</dd></dl>
+      </div></details>
+      <details class="faq" id="links"><summary>What is “Link to source”? How is it different from copying?</summary><div>
+        <p>A link is a filesystem symbolic link: a directory entry at the destination that points to the original skill directory. It is not a copy, upload, periodic sync job, or internet shortcut.</p>
+        <pre><code>Original directory:
+~/projects/logs_fw/.github/skills/log-triage/
+  SKILL.md
+  scripts/
+
+Agent destination:
+~/.copilot/skills/log-triage
+  points to the original directory above</code></pre>
+        <p>The destination sees the original SKILL.md and supporting files. Editing through either path edits the same underlying files. There is no second version to keep synchronized. The source must remain available, and the receiving agent must support directory symlinks and that skills path.</p>
+        <p>An independent copy duplicates the directory. It can be edited separately and survives removal of the source, but later changes do not propagate. Copies containing symbolic links or special files are refused; the limit is 25 MiB and 2,000 files/folders.</p>
+        <p>Existing destinations are never overwritten or merged. A destination that already uses the same source is unchanged; another skill with the same folder name produces a conflict.</p>
+      </div></details>
+      <details class="faq" id="reuse"><summary>How do I reuse logs_fw skills in Sahaa or another agent?</summary><div>
+        <ol><li>Register the logs_fw repository in Workspaces.</li><li>In Agents, configure Sahaa with the exact folder its documentation says it loads. There is no verified Sahaa skills-folder default in this application.</li><li>Select the workspace skill in Library and choose Share with agents.</li><li>Select Link to source and the destination. Select other configured agents or Shared library too, if wanted.</li><li>Start a new agent session or use the agent’s reload command if it caches skills.</li></ol>
+        <p>If Sahaa or Zllm does not support skills, creating a folder or link cannot add that capability. Use an agent-supported instruction mechanism instead. This dashboard does not inject instructions into agent conversations.</p>
+      </div></details>
+      <details class="faq" id="scan"><summary>What does Rescan do? Does it change my files?</summary><div>
+        <p>Rescan re-reads configured agent folders and registered workspace skill locations, checks known agent paths, parses SKILL.md names/descriptions, and resolves symlinks to group the same source. It refreshes counts and reports missing, broken, or unreadable locations. It does not copy, link, install, execute, or delete anything.</p>
+        <p>The app also reads the inventory on page load and after changes. There is no timer, filesystem watcher, or background sync. Click Rescan after an external edit. Searches and filters only select from the loaded inventory; selecting a skill reads its detail again.</p>
+        <p>Inventory scanning is limited to 6,000 candidate folders. Documents larger than 512 KiB are not previewed or edited. Only name/description metadata is parsed, not all YAML syntax; the original Markdown is displayed as escaped text.</p>
+      </div></details>
+      <details class="faq" id="detection"><summary>Why are Sahaa and Zllm listed? What intelligence detects an agent?</summary><div>
+        <p>There is no AI, executable lookup, package inspection, process inspection, or automatic capability detection. Sahaa and Zllm were included as built-in presets because they were named in the original app requirements.</p>
+        <p>For built-in Sahaa, the app checks whether ~/.sahaa exists. For Zllm, it checks ~/.zllm. Other presets check their known top-level directory, such as ~/.claude or ~/.codex. The Agents page shows the exact checked path and whether it exists.</p>
+        <p>“Known agent paths” counts existing preset/custom paths, excluding Shared library. A leftover directory can count even if the agent was uninstalled. This is folder evidence, not proof that an agent is installed, running, or able to load skills.</p>
+        <p>Sahaa and Zllm have no default skills destination here. “Needs skills folder” means you must configure one; finding their top-level directory does not establish skill support. Once you configure an agent, its evidence path becomes the configured skills folder.</p>
+      </div></details>
+      <details class="faq" id="new-agent"><summary>How is a new agent discovered or added?</summary><div>
+        <p>Unknown agents are not discovered automatically. Installing a new CLI or adding ~/.new-agent will not create a dashboard entry.</p>
+        <p>Use Agents, Add agent, enter its name and documented absolute skills path. The path can be missing initially; it is created only when you share a skill. Rescan then checks that registered path and reads any skill directories in it. The shared-library convention alone is not a guarantee of compatibility.</p>
+        <p>To support automatic discovery of another named agent in the future, a developer would add its documented preset to BUILT_INS in core.mjs. Generic custom registration needs no code change.</p>
+      </div></details>
+      <details class="faq" id="folders"><summary>Which folders are scanned? What should a skill folder look like?</summary><div>
+        <p>The ~ symbol means your home folder. Names beginning with a dot are normally hidden folders on macOS and Linux. A workspace path belongs to your project, not to this dashboard’s installation folder.</p>
+        <p>Default user-level locations are ~/.agents/skills, ~/.claude/skills, ~/.codex/skills, ~/.copilot/skills, ~/.cursor/skills, and ~/.gemini/skills. They can be configured in Agents.</p>
+        <p>For each registered workspace, the app checks .agents/skills, .github/skills, .claude/skills, .codex/skills, .copilot/skills, .cursor/skills, and .gemini/skills. It also checks the registered folder itself for direct skill directories.</p>
+        <pre><code>logs_fw/
+  .github/
+    skills/
+      log-triage/
+        SKILL.md
+        scripts/       (optional)
+        references/    (optional)</code></pre>
+        <p>A standalone Markdown file or a directory without SKILL.md is not a skill in this app. Plugin caches and vendor-specific formats are not crawled automatically; register a compatible plugin skills folder explicitly.</p>
+      </div></details>
+      <details class="faq" id="discovery"><summary>How is Discover folders different from Rescan?</summary><div>
+        <p>Discover folders looks for unregistered repositories containing known workspace skill paths. It searches the current project’s parent plus ~/Projects, ~/AI Projects, ~/Developer, ~/code, ~/repos, ~/work, and ~/git.</p>
+        <p>It goes at most three levels deep, stops descending once it finds a skill location, caps the search at 1,500 directories, and skips hidden/dependency/build directories. It suggests candidates without registering them. It does not search the entire disk, open arbitrary agent configuration files, or discover new agent brands.</p>
+        <p>Use Add workspace for other paths, deeper repositories, or a directly managed skill collection. Permission errors are shown rather than silently treated as success.</p>
+      </div></details>
+      <details class="faq" id="removal"><summary>How do I remove a skill? Can I undo it?</summary><div>
+        <p>Select the skill in Library, choose Remove skill, select the exact location, and type the skill name to confirm. A linked location removes only that link; an original or independent copy moves the whole directory into local recovery storage.</p>
+        <p>The source cannot be removed while other registered locations use it. Remove those links first. Links outside registered folders cannot be detected, so check other consumers before removing a source.</p>
+        <p>Use Activity, Removed skills, Restore to put a location back. Restoring refuses an occupied original path. Recovery is kept under your profile’s trash folder without automatic expiry; this is application recovery storage, not the operating system’s Trash.</p>
+        <p>Removal uses an atomic move on the same filesystem. If the skill is on another filesystem, removal is refused without copying or deleting it. A profile located on the skill’s filesystem can be used instead. No permanent-delete button is provided.</p>
+        <p>Removing an agent/workspace registration only hides that registration; it does not remove its skills. Disconnect link in Activity only unlinks an unchanged link previously created by this app.</p>
+      </div></details>
+      <details class="faq" id="architecture"><summary>What is the architecture and project folder structure?</summary><div>
+        <pre><code>Browser: index.html + styles.css + app.js
+  sends local HTTP requests to
+Node.js: server.mjs (127.0.0.1 only)
+  calls
+core.mjs: scans, validates, links, copies, edits, removes
+  reads/writes
+Your skill folders + local settings/recovery storage</code></pre>
+        <p>The browser cannot directly read your disk. server.mjs exposes a small local JSON API and a fixed list of static files. core.mjs uses Node’s filesystem library. Mutating API requests are serialized and require the current session token. No database, framework, cloud service, AI model, or runtime dependency is used.</p>
+        <pre><code>skills-viewer/
+  package.json      Start/check/test commands
+  server.mjs        Local HTTP server and API routes
+  core.mjs          Skill and settings operations
+  index.html        All five application pages
+  app.js            Navigation, forms, and API requests
+  styles.css        Application layout and styles
+  tokens.css        Design tokens
+  base.css          Shared base styles
+  icon.svg          App icon
+  test/
+    app.test.mjs    Isolated filesystem/API checks
+  README.md         Setup and detailed documentation</code></pre>
+      </div></details>
+      <details class="faq" id="storage"><summary>Where are settings, history, and removed files stored?</summary><div>
+        <pre><code>~/.config/skills-viewer/
+  settings.json       Agent/workspace registry and history
+  trash/
+    &lt;removal-id&gt;/
+      skill           Archived directory or symbolic link</code></pre>
+        <p>SKILLS_VIEWER_DATA_DIR overrides the entire profile location. Settings are written atomically after changes, not on a read-only scan. The latest 200 activity events are retained; pending recovery records are not expired when old history is trimmed. Recovery folders are not a backup system: keep important original skills in version control.</p>
+        <p>The app has the permissions of the user who starts it. Access-denied errors are shown. Do not run it as root or expose it through a network proxy. There is no cross-process lock, so run one server per profile and avoid simultaneous external writes during edits, removal, or restore.</p>
+      </div></details>
+      <details class="faq" id="privacy"><summary>Is anything sent to GitHub or the cloud? Must the dashboard stay open?</summary><div>
+        <p>The running application makes no external network requests. Publishing this application’s source to GitHub does not upload your registered skill folders, local profile, or recovery files. GitHub authentication is needed only for repository access, not for running the dashboard.</p>
+        <p>Links and copies remain usable with the browser and server closed. A linked source must stay available. Agent caching and skill compatibility are controlled by each agent. The footer shows server process RSS only, not the browser’s memory usage.</p>
+      </div></details>
+      <details class="faq" id="troubleshooting"><summary>Why is a skill missing, duplicated, or not loading in an agent?</summary><div>
+        <p>For missing skills: check the registered path and supported folder structure, verify SKILL.md is a regular readable file, look at scan warnings, and click Rescan. A symlinked SKILL.md itself is refused, although linking the whole skill directory is supported.</p>
+        <p>Separate copies appear separately even when their names match. Directory symlinks to the same real source are grouped into one library entry. An agent’s count measures locations in its own folder, not additional unique content.</p>
+        <p>For agent loading: verify the actual agent/version supports skills and directory symlinks, configure the folder it really reads, check that the source still exists, and restart/reload that agent. Folder evidence never proves loading works.</p>
+        <p>If an edit is rejected as stale, copy your draft somewhere safe, cancel the edit, rescan, and reopen the skill before trying again. If recovery storage or an original path changed, the app refuses to overwrite it; inspect the reported paths manually.</p>
+      </div></details>
+    </section>
+    <footer><span><span data-icon="lock"></span>Local files. No cloud. No account.</span><span id="runtime-info">Zero runtime dependencies</span><a href="/?tab=help" data-tab="help">Help &amp; FAQ</a></footer>
+  </main>
+  <dialog id="share-dialog" aria-labelledby="share-title">
+    <div class="section-title"><div><h2 id="share-title">Share skill</h2><p class="muted small" id="share-name"></p></div><button class="icon-button" id="close-share" type="button" aria-label="Close sharing"><span data-icon="close"></span></button></div>
+    <form id="share-form">
+      <fieldset class="method-choice"><legend>Sharing method</legend><label><input type="radio" name="mode" value="link" checked><span><strong>Link to source</strong><small>One source. Updates available everywhere.</small></span><span class="recommended">Recommended</span></label><label><input type="radio" name="mode" value="copy"><span><strong>Independent copy</strong><small>Includes supporting files. Does not stay in sync.</small></span></label></fieldset>
+      <fieldset class="destinations"><legend>Agent destinations</legend><div class="destination-actions"><button class="text-button" id="select-all" type="button">Select available</button><button class="text-button" id="clear-targets" type="button">Clear</button></div><div id="share-targets"></div></fieldset>
+      <p class="helper">Existing destinations are never overwritten. Links require the source folder to stay in place.</p>
+      <div id="share-results" role="status"></div>
+      <p id="share-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions"><button class="button quiet" id="cancel-share" type="button">Cancel</button><button class="button primary" type="submit" id="sync-submit"><span data-icon="link"></span>Create links</button></div>
+    </form>
+  </dialog>
+  <dialog id="remove-dialog" aria-labelledby="remove-title">
+    <div class="section-title"><h2 id="remove-title">Remove skill</h2><button class="icon-button" id="close-remove" type="button" aria-label="Close removal"><span data-icon="close"></span></button></div>
+    <form id="remove-form">
+      <label class="stacked-field">Skill location<select id="remove-location" name="location" required></select></label>
+      <p class="helper" id="remove-impact"></p>
+      <p class="helper">Removed files are kept in local recovery storage, not permanently deleted. Links outside registered folders cannot be detected. <a href="/?tab=help#removal" id="remove-help">Read removal safety rules</a></p>
+      <label class="stacked-field">Type <strong id="remove-confirm-name"></strong> to confirm<input id="remove-confirmation" name="confirmation" required autocomplete="off" spellcheck="false"></label>
+      <p class="form-error" id="remove-error" role="alert"></p>
+      <div class="dialog-actions"><button class="button quiet" id="cancel-remove" type="button">Cancel</button><button class="button primary" id="remove-submit" type="submit">Remove this location</button></div>
+    </form>
+  </dialog>
+  <noscript><div class="noscript">JavaScript is required to inspect local skills and manage destinations. No changes are made with JavaScript disabled.</div></noscript>
+</body>
+</html>
